@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="لوحات">
+<title>أسعار اللوحات</title>
+<style>
+  body { font-family: -apple-system, sans-serif; margin: 0; padding: 16px; background: #f2f2f7; color: #000; }
+  h2 { margin-top: 24px; }
+  input, button, textarea, select { font-size: 16px; padding: 10px; margin: 4px 0; width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #ccc; }
+  button { background: #007aff; color: #fff; border: none; }
+  .card { background: #fff; padding: 12px; margin: 8px 0; border-radius: 10px; }
+  .pattern { font-weight: bold; font-size: 18px; direction: ltr; text-align: right; }
+  .del { background: #ff3b30; width: auto; padding: 4px 10px; font-size: 13px; }
+  textarea, #search { direction: ltr; }
+  .hint { color: #666; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h2>بحث</h2>
+<input id="search" placeholder="نمط XXYYZ أو رقم 61600 أو حرف R" oninput="render()">
+<select id="patternPick" onchange="pickPattern()"></select>
+<div class="hint">تقدر تكتب أكثر من شي مع بعض، مثل: R XXYYZ</div>
+<div id="summary" class="card"></div>
+
+<h2>الأنماط</h2>
+<div id="patterns"></div>
+
+<h2>كل المبيعات</h2>
+<div id="list"></div>
+
+<h2>استيراد من الملاحظات</h2>
+<textarea id="bulk" rows="6" placeholder="الصق القائمة هنا"></textarea>
+<button onclick="importBulk()">استيراد</button>
+
+<h2>إضافة لوحة مباعة</h2>
+<input id="code" maxlength="2" placeholder="حرف الفئة مثل R" style="direction:ltr">
+<input id="num" type="number" inputmode="numeric" placeholder="رقم اللوحة مثل 11223">
+<input id="price" type="number" inputmode="numeric" placeholder="سعر البيع مثل 4500">
+<input id="date" type="date">
+<button onclick="addSale()">حفظ</button>
+
+<script>
+let sales = [];
+try { sales = JSON.parse(localStorage.getItem("sales") || "[]"); } catch (e) { sales = []; }
+
+function save() {
+  try { localStorage.setItem("sales", JSON.stringify(sales)); } catch (e) {}
+}
+
+function getPattern(n) {
+  const letters = "XYZABCDEFGHIJKLMNOPQRSTUVW";
+  const map = {};
+  let out = "";
+  for (const d of String(n)) {
+    if (!(d in map)) map[d] = letters[Object.keys(map).length];
+    out += map[d];
+  }
+  return out;
+}
+
+function addSale() {
+  const code = document.getElementById("code").value.trim().toUpperCase();
+  const num = document.getElementById("num").value.trim();
+  const price = Number(document.getElementById("price").value);
+  const date = document.getElementById("date").value;
+  if (!num || !price) return alert("عبّ الرقم والسعر");
+  sales.push({ code, num, price, date });
+  save();
+  document.getElementById("num").value = "";
+  document.getElementById("price").value = "";
+  render();
+}
+
+function removeSale(i) {
+  sales.splice(i, 1);
+  save();
+  render();
+}
+
+function importBulk() {
+  const text = document.getElementById("bulk").value;
+  let added = 0, skipped = 0;
+  const skippedLines = [];
+  text.split("\n").forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    const pm = line.match(/(\d+(?:\.\d+)?)\s*k/i);
+    const lm = line.match(/([A-Za-z])\s*(\d{1,5})\b/);
+    if (!pm || !lm) { skipped++; skippedLines.push(line); return; }
+    sales.push({
+      code: lm[1].toUpperCase(),
+      num: lm[2],
+      price: Math.round(parseFloat(pm[1]) * 1000),
+      date: ""
+    });
+    added++;
+  });
+  save();
+  document.getElementById("bulk").value = skippedLines.join("\n");
+  render();
+  alert("تمت إضافة " + added + " لوحة" + (skipped ? "، وتخطيت " + skipped + " سطر (تركتها لك في الخانة عشان تراجعها)" : ""));
+}
+
+function matches(s, q) {
+  if (!q) return true;
+  const pattern = getPattern(s.num);
+  const code = (s.code || "").toUpperCase();
+  return q.split(/\s+/).filter(Boolean).every(t => {
+    if (/^\d+$/.test(t)) return String(s.num).includes(t);
+    if (t.length === 1 && /^[A-Z]$/.test(t)) return code === t;
+    return pattern.includes(t);
+  });
+}
+
+function pickPattern() {
+  document.getElementById("search").value = document.getElementById("patternPick").value;
+  render();
+}
+
+function fillPatternMenu() {
+  const sel = document.getElementById("patternPick");
+  const current = sel.value;
+  const counts = {};
+  sales.forEach(s => {
+    const p = getPattern(s.num);
+    counts[p] = (counts[p] || 0) + 1;
+  });
+  const opts = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  sel.innerHTML = '<option value="">اختر نمط من القائمة</option>' +
+    opts.map(([p, c]) => '<option value="' + p + '">' + p + ' (' + c + ')</option>').join("");
+  sel.value = current;
+}
+
+function render() {
+  fillPatternMenu();
+  const q = document.getElementById("search").value.trim().toUpperCase();
+  const filtered = sales.map((s, i) => ({ s, i })).filter(x => matches(x.s, q));
+  const prices = filtered.map(x => x.s.price);
+  const summary = document.getElementById("summary");
+
+  if (q && prices.length) {
+    const avg = Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+    summary.innerHTML = "النتائج: <b>" + prices.length + "</b> لوحة | متوسط: <b>" + avg.toLocaleString() + "</b><br>" +
+      "أقل: " + Math.min(...prices).toLocaleString() + " | أعلى: " + Math.max(...prices).toLocaleString();
+  } else if (q) {
+    summary.innerHTML = "ما لقيت نتائج";
+  } else {
+    summary.innerHTML = "إجمالي اللوحات: <b>" + sales.length + "</b>";
+  }
+
+  const groups = {};
+  filtered.forEach(x => {
+    const p = getPattern(x.s.num);
+    (groups[p] = groups[p] || []).push(x.s.price);
+  });
+
+  document.getElementById("patterns").innerHTML = Object.entries(groups)
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([p, arr]) => {
+      const avg = Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+      return '<div class="card"><div class="pattern">' + p + '</div>' +
+        'عدد: ' + arr.length + ' | متوسط: ' + avg.toLocaleString() + '<br>' +
+        'أقل: ' + Math.min(...arr).toLocaleString() + ' | أعلى: ' + Math.max(...arr).toLocaleString() + '</div>';
+    }).join("") || "لا يوجد";
+
+  document.getElementById("list").innerHTML = filtered.map(x => {
+    const s = x.s;
+    return '<div class="card">' + (s.code || "") + ' ' + s.num +
+      ' <span class="pattern">' + getPattern(s.num) + '</span><br>' +
+      s.price.toLocaleString() + ' | ' + (s.date || "") +
+      ' <button class="del" onclick="removeSale(' + x.i + ')">حذف</button></div>';
+  }).join("");
+}
+
+render();
+</script>
+</body>
+</html>
